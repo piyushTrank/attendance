@@ -299,12 +299,17 @@ class InTimeAttendance(APIView):
             if not latest_data:
                 return Response({"status": status.HTTP_404_NOT_FOUND, "message": "No attendance data found."}, status=status.HTTP_404_NOT_FOUND)
             
-            serialized_data = {
-                "id": latest_data.id,
-                "in_time": latest_data.in_time,
-                "out_time": latest_data.out_time,
-            }
-            
+            if latest_data.in_time.date() == datetime.now().date():
+                serialized_data = {
+                    "id": latest_data.id,
+                    "in_time": latest_data.in_time,
+                    "out_time": latest_data.out_time,
+                }
+            else:
+                serialized_data = {
+                    "id": latest_data.id,
+                }
+                
             return Response({"status": status.HTTP_200_OK, "data": serialized_data}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"status": status.HTTP_500_INTERNAL_SERVER_ERROR, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
