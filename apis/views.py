@@ -360,7 +360,7 @@ class RegularizationApi(APIView):
     
     def get(self, request):
         if request.user.user_type == "Admin":
-            regularization = RegularizationModel.objects.values("id", "user_regularization__first_name","user_regularization__last_name", "user_regularization__designation","in_time", "out_time", "reason", "approval", "date")
+            regularization = RegularizationModel.objects.values("id", "user_regularization__uuid", "user_regularization__first_name","user_regularization__last_name", "user_regularization__designation","in_time", "out_time", "reason", "approval", "date")
             paginator = StandardResultsSetPagination()
             paginated_queryset = paginator.paginate_queryset(regularization, request, view=self)
             return paginator.get_paginated_response(paginated_queryset)
@@ -370,5 +370,30 @@ class RegularizationApi(APIView):
 
 class ApprovalRegularise(APIView):
     def post(self, request):
-        pass
-
+        user_regularise = MyUser.objects.filter(uuid=request.data["uuid"]).first()
+        regularise_obj = RegularizationModel.objects.filter(id=request.data["id"]).first()
+        
+        if user_regularise and regularise_obj:
+            in_time_combined = datetime.combine(regularise_obj.date, regularise_obj.in_time)
+            out_time_combined = datetime.combine(regularise_obj.date, regularise_obj.out_time)
+            
+            duration_seconds = (out_time_combined - in_time_combined).total_seconds()
+            hours = int(duration_seconds // 3600)
+            minutes = int((duration_seconds % 3600) // 60)
+            seconds = int(duration_seconds % 60)
+            
+            duration = f"{hours}:{minutes:02}:{seconds:02}"
+            
+            AttendanceModel.objects.filter(attendance_user=user_regularise, in_time__date=regularise_obj.date).delete()
+            if request.data["approval"]:
+                AttendanceModel.objects.create(
+                    attendance_user=user_regularise,
+                    in_time=in_time_combined,
+                    out_time=out_time_combined,
+                    duration=duration
+                )
+            regularise_obj.approval = request.data["approval"]
+            regularise_obj.save()
+            return Response({"status": status.HTTP_200_OK})
+        
+        return Response({"status": status.HTTP_404_NOT_FOUND, "message": "Something went wrong."}, status=status.HTTP_404_NOT_FOUND)

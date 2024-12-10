@@ -171,7 +171,7 @@ class AnouncementModel(CommonTimePicker):
     
 class RegularizationModel(CommonTimePicker):
     user_regularization = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name='user_regularization')
-    date=models.DateField("Date", blank=True, null=True)
+    date = models.DateField("Date", blank=True, null=True)
     in_time = models.TimeField("In Time",blank=True, null=True)
     out_time = models.TimeField("Out Time",blank=True, null=True)
     reason = models.CharField("Reason", max_length=200, blank=True, null=True)
