@@ -19,6 +19,7 @@ urlpatterns = [
     path('in-out-time/', AttendanceInOutTime.as_view(),name="in-out-time"),
     path('in-time/', InTimeAttendance.as_view(),name="in-time"),
     path('get-all-attendance/', GetAllAttendance.as_view(),name="get-all-attendance"),
+    path('admin-dashboard-attendance/', AdminDashboardAttendance.as_view(),name="admin-dashboard-attendance"),
 
     # Regularization ============================================================
     path('apply-regularization/', RegularizationApi.as_view(),name="apply-regularization"),

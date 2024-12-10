@@ -295,7 +295,7 @@ class InTimeAttendance(APIView):
             else:
                 current_user = request.user
             
-            latest_data = current_user.attendance_user.first()
+            latest_data = current_user.attendance_user.filter(in_time__date=datetime.now().date()).first()
             if not latest_data:
                 return Response({"status": status.HTTP_404_NOT_FOUND, "message": "No attendance data found."}, status=status.HTTP_404_NOT_FOUND)
             
@@ -330,8 +330,21 @@ class GetAllAttendance(APIView):
             return paginator.get_paginated_response(paginated_queryset)
         except Exception as e:
             return Response({"message": str(e), "code": status.HTTP_404_NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
-        
 
+
+class AdminDashboardAttendance(APIView):
+    def get(self, request):
+        total_employee_count = MyUser.objects.exclude(user_type="Admin").count()
+        count_attendance = AttendanceModel.objects.filter(in_time__date=datetime.now().date()).count()
+        absent_count = total_employee_count - count_attendance
+        
+        return Response({
+            "status": status.HTTP_200_OK,
+            "present": count_attendance,
+            "total": total_employee_count,
+            "absent": absent_count
+        })
+            
 
 class RegularizationApi(APIView):
     permission_classes = [IsAuthenticated]
@@ -402,3 +415,4 @@ class ApprovalRegularise(APIView):
             return Response({"status": status.HTTP_200_OK})
         
         return Response({"status": status.HTTP_404_NOT_FOUND, "message": "Something went wrong."}, status=status.HTTP_404_NOT_FOUND)
+    
