@@ -295,11 +295,14 @@ class InTimeAttendance(APIView):
             {
                 "attendance_user": record.attendance_user.first_name,  
                 "in_time": record.in_time,
-                # "out_time": record.out_time,
-                # "duration": record.duration
             }
             for record in in_time_records
         ]
         
         return Response({"attendance": attendance_data})
+
+
+
+
+
 
