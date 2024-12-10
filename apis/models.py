@@ -94,6 +94,9 @@ class AttendanceModel(CommonTimePicker):
     out_time = models.DateTimeField("Out Time",blank=True, null=True)
     duration = models.CharField("Duration",max_length=100, blank=True,null=True)
 
+    class Meta:
+        ordering = ['-id']
+
     def __str__(self):
         return self.attendance_user.first_name
 

@@ -285,21 +285,26 @@ class InTimeAttendance(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        in_time_records = AttendanceModel.objects.filter(
-            Q(in_time__isnull=False) & Q(out_time__isnull=True))
-        
-        if not in_time_records:
-            return Response({"message": "No records found where in_time exists and out_time is not set."}, status=404)
-
-        attendance_data = [
-            {
-                "attendance_user": record.attendance_user.first_name,  
-                "in_time": record.in_time,
-                # "out_time": record.out_time,
-                # "duration": record.duration
+        try:
+            uuid = request.query_params.get("uuid")
+            if uuid:
+                try:
+                    current_user = MyUser.objects.get(uuid=uuid)
+                except MyUser.DoesNotExist:
+                    return Response({"status": status.HTTP_404_NOT_FOUND, "message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                current_user = request.user
+            
+            latest_data = current_user.attendance_user.first()
+            if not latest_data:
+                return Response({"status": status.HTTP_404_NOT_FOUND, "message": "No attendance data found."}, status=status.HTTP_404_NOT_FOUND)
+            
+            serialized_data = {
+                "id": latest_data.id,
+                "in_time": latest_data.in_time,
+                "out_time": latest_data.out_time,
             }
-            for record in in_time_records
-        ]
-        
-        return Response({"attendance": attendance_data})
-
+            
+            return Response({"status": status.HTTP_200_OK, "data": serialized_data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"status": status.HTTP_500_INTERNAL_SERVER_ERROR, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
