@@ -308,3 +308,67 @@ class InTimeAttendance(APIView):
             return Response({"status": status.HTTP_200_OK, "data": serialized_data}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"status": status.HTTP_500_INTERNAL_SERVER_ERROR, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class GetAllAttendance(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            get_user = MyUser.objects.get(uuid=request.query_params.get("uuid"))
+            if get_user.user_type == "Admin":
+                attendance = AttendanceModel.objects.values("id", "attendance_user__first_name","attendance_user__last_name","attendance_user__designation", "in_time", "out_time", "duration",  "created_at").order_by("-id")
+            else:
+                attendance = get_user.attendance_user.values("id", "attendance_user__first_name","attendance_user__last_name", "attendance_user__designation","in_time", "out_time", "duration", "created_at").order_by("-id")
+            paginator = StandardResultsSetPagination()
+            paginated_queryset = paginator.paginate_queryset(attendance, request, view=self)
+            return paginator.get_paginated_response(paginated_queryset)
+        except Exception as e:
+            return Response({"message": str(e), "code": status.HTTP_404_NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
+        
+
+
+class RegularizationApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            current_user = MyUser.objects.filter(uuid=request.query_params.get("uuid")).first() or request.user
+            if not current_user or not isinstance(current_user, MyUser):
+                return Response({"message": "Invalid user.", "code": status.HTTP_400_BAD_REQUEST}, status=status.HTTP_400_BAD_REQUEST)
+            existing_regularization = RegularizationModel.objects.filter(
+                user_regularization=current_user,
+                date=request.data['date']
+            ).first()
+
+            if existing_regularization:
+                return Response({"message": "Regularization already applied for this date.", "code": status.HTTP_400_BAD_REQUEST}, status=status.HTTP_400_BAD_REQUEST)
+
+            RegularizationModel.objects.create(
+                user_regularization=current_user,
+                date=request.data['date'],
+                in_time=request.data['in_time'],
+                out_time=request.data['out_time'],
+                reason=request.data['reason']
+            )
+            
+            return Response({"code": status.HTTP_200_OK, "message": "Regularization applied successfully."}, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({"message": str(e), "code": status.HTTP_404_NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
+        
+    
+    def get(self, request):
+        if request.user.user_type == "Admin":
+            regularization = RegularizationModel.objects.values("id", "user_regularization__first_name","user_regularization__last_name", "user_regularization__designation","in_time", "out_time", "reason", "approval", "date")
+            paginator = StandardResultsSetPagination()
+            paginated_queryset = paginator.paginate_queryset(regularization, request, view=self)
+            return paginator.get_paginated_response(paginated_queryset)
+        else:
+            return Response({"status": status.HTTP_404_NOT_FOUND, "message": "Permission not allowed."}, status=status.HTTP_404_NOT_FOUND)
+        
+
+class ApprovalRegularise(APIView):
+    def post(self, request):
+        pass
+

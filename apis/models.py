@@ -168,3 +168,17 @@ class AnouncementModel(CommonTimePicker):
 
     def __str__(self):
         return self.title
+    
+class RegularizationModel(CommonTimePicker):
+    user_regularization = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name='user_regularization')
+    date=models.DateField("Date", blank=True, null=True)
+    in_time = models.TimeField("In Time",blank=True, null=True)
+    out_time = models.TimeField("Out Time",blank=True, null=True)
+    reason = models.CharField("Reason", max_length=200, blank=True, null=True)
+    approval = models.BooleanField("Approval", default=False)
+
+    class Meta:
+        ordering = ['-id']
+
+    def __str__ (self):
+       return f"{self.user_regularization.first_name} {self.reason}"
