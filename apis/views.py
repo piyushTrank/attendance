@@ -285,24 +285,120 @@ class InTimeAttendance(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        in_time_records = AttendanceModel.objects.filter(
-            Q(in_time__isnull=False) & Q(out_time__isnull=True))
+        try:
+            uuid = request.query_params.get("uuid")
+            if uuid:
+                try:
+                    current_user = MyUser.objects.get(uuid=uuid)
+                except MyUser.DoesNotExist:
+                    return Response({"status": status.HTTP_404_NOT_FOUND, "message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                current_user = request.user
+            
+            latest_data = current_user.attendance_user.first()
+            if not latest_data:
+                return Response({"status": status.HTTP_404_NOT_FOUND, "message": "No attendance data found."}, status=status.HTTP_404_NOT_FOUND)
+            
+            if latest_data.in_time.date() == datetime.now().date():
+                serialized_data = {
+                    "id": latest_data.id,
+                    "in_time": latest_data.in_time,
+                    "out_time": latest_data.out_time,
+                }
+            else:
+                serialized_data = {
+                    "id": latest_data.id,
+                }
+                
+            return Response({"status": status.HTTP_200_OK, "data": serialized_data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"status": status.HTTP_500_INTERNAL_SERVER_ERROR, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        if not in_time_records:
-            return Response({"message": "No records found where in_time exists and out_time is not set."}, status=404)
 
-        attendance_data = [
-            {
-                "attendance_user": record.attendance_user.first_name,  
-                "in_time": record.in_time,
-            }
-            for record in in_time_records
-        ]
+class GetAllAttendance(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            get_user = MyUser.objects.get(uuid=request.query_params.get("uuid"))
+            if get_user.user_type == "Admin":
+                attendance = AttendanceModel.objects.values("id", "attendance_user__first_name","attendance_user__last_name","attendance_user__designation", "in_time", "out_time", "duration",  "created_at").order_by("-id")
+            else:
+                attendance = get_user.attendance_user.values("id", "attendance_user__first_name","attendance_user__last_name", "attendance_user__designation","in_time", "out_time", "duration", "created_at").order_by("-id")
+            paginator = StandardResultsSetPagination()
+            paginated_queryset = paginator.paginate_queryset(attendance, request, view=self)
+            return paginator.get_paginated_response(paginated_queryset)
+        except Exception as e:
+            return Response({"message": str(e), "code": status.HTTP_404_NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
         
-        return Response({"attendance": attendance_data})
 
 
+class RegularizationApi(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        try:
+            current_user = MyUser.objects.filter(uuid=request.query_params.get("uuid")).first() or request.user
+            if not current_user or not isinstance(current_user, MyUser):
+                return Response({"message": "Invalid user.", "code": status.HTTP_400_BAD_REQUEST}, status=status.HTTP_400_BAD_REQUEST)
+            existing_regularization = RegularizationModel.objects.filter(
+                user_regularization=current_user,
+                date=request.data['date']
+            ).first()
 
+            if existing_regularization:
+                return Response({"message": "Regularization already applied for this date.", "code": status.HTTP_400_BAD_REQUEST}, status=status.HTTP_400_BAD_REQUEST)
 
+            RegularizationModel.objects.create(
+                user_regularization=current_user,
+                date=request.data['date'],
+                in_time=request.data['in_time'],
+                out_time=request.data['out_time'],
+                reason=request.data['reason']
+            )
+            
+            return Response({"code": status.HTTP_200_OK, "message": "Regularization applied successfully."}, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({"message": str(e), "code": status.HTTP_404_NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
+        
+    
+    def get(self, request):
+        if request.user.user_type == "Admin":
+            regularization = RegularizationModel.objects.values("id", "user_regularization__uuid", "user_regularization__first_name","user_regularization__last_name", "user_regularization__designation","in_time", "out_time", "reason", "approval", "date")
+            paginator = StandardResultsSetPagination()
+            paginated_queryset = paginator.paginate_queryset(regularization, request, view=self)
+            return paginator.get_paginated_response(paginated_queryset)
+        else:
+            return Response({"status": status.HTTP_404_NOT_FOUND, "message": "Permission not allowed."}, status=status.HTTP_404_NOT_FOUND)
+        
 
+class ApprovalRegularise(APIView):
+    def post(self, request):
+        user_regularise = MyUser.objects.filter(uuid=request.data["uuid"]).first()
+        regularise_obj = RegularizationModel.objects.filter(id=request.data["id"]).first()
+        
+        if user_regularise and regularise_obj:
+            in_time_combined = datetime.combine(regularise_obj.date, regularise_obj.in_time)
+            out_time_combined = datetime.combine(regularise_obj.date, regularise_obj.out_time)
+            
+            duration_seconds = (out_time_combined - in_time_combined).total_seconds()
+            hours = int(duration_seconds // 3600)
+            minutes = int((duration_seconds % 3600) // 60)
+            seconds = int(duration_seconds % 60)
+            
+            duration = f"{hours}:{minutes:02}:{seconds:02}"
+            
+            AttendanceModel.objects.filter(attendance_user=user_regularise, in_time__date=regularise_obj.date).delete()
+            if request.data["approval"]:
+                AttendanceModel.objects.create(
+                    attendance_user=user_regularise,
+                    in_time=in_time_combined,
+                    out_time=out_time_combined,
+                    duration=duration
+                )
+            regularise_obj.approval = request.data["approval"]
+            regularise_obj.save()
+            return Response({"status": status.HTTP_200_OK})
+        
+        return Response({"status": status.HTTP_404_NOT_FOUND, "message": "Something went wrong."}, status=status.HTTP_404_NOT_FOUND)
