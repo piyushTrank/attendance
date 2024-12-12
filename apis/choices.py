@@ -10,9 +10,8 @@ GENDER = {
 }
 
 LEAVE_TYPE = (
-        ('Earned', 'Earned Leave'),
-        ('Sick', 'Sick Leave'),
-        ('Casual', 'Casual Leave'),
+        ('Earned', 'Earned'),
+        ('Sick', 'Sick')
     )
 
 LEAVE_STATUS = (

@@ -66,6 +66,7 @@ class MyUser(AbstractBaseUser,CommonTimePicker):
     class Meta:
         verbose_name = "User"
         verbose_name_plural = "Users"
+        ordering = ['-id']
 
     def __str__(self):
         return f"{self.uuid}_{self.email}" 
@@ -115,6 +116,9 @@ class LeavesModel(CommonTimePicker):
     approved_by = models.ForeignKey(MyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='approver')
     approved_on = models.DateTimeField("Approved On", null=True, blank=True)
 
+    class Meta:
+        ordering = ['-id']
+
     def __str__(self):
         return self.leave_user.first_name
 
@@ -130,6 +134,9 @@ class LeaveBalanceModel(models.Model):
     leave_balance_user = models.OneToOneField(MyUser, on_delete=models.CASCADE, related_name='leave_balance_user')
     earned_leave = models.FloatField("Earned Leave", default=0)
     sick_leave = models.FloatField("Sick Leave", default=0)
+
+    class Meta:
+        ordering = ['-id']
 
     def __str__(self):
         return self.leave_balance_user.first_name

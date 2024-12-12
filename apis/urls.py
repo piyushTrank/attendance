@@ -24,6 +24,15 @@ urlpatterns = [
     # Regularization ============================================================
     path('apply-regularization/', RegularizationApi.as_view(),name="apply-regularization"),
     path('approve-regularization/', ApprovalRegularise.as_view(),name="approve-regularization"),
+
+    path('dashboard-linechart/', DashBoardMonthlyChart.as_view(),name="dashboard-linechart"),
+    path('employee-attendance/', EmployeeAttendanceCalendar.as_view(),name="employee-attendance"),
+    path('employee-counts/', EmployeeDashboardCount.as_view(),name="employee-counts"),
+    path('apply-leave/', ApplyLeaveApi.as_view(),name="apply-leave"),
+    path('leave-listing/', LeavesApi.as_view(),name="leave-listing"),
+    path('approve-leaves/', ApprovedLeave.as_view(),name="approve-leaves"),
+
+    path('attendance-management/', AttendanceManagementApi.as_view(),name="attendance-management"),
 ]
 
 
