@@ -99,7 +99,7 @@ class AttendanceModel(CommonTimePicker):
         ordering = ['-id']
 
     def __str__(self):
-        return self.attendance_user.first_name
+        return f"{self.attendance_user.first_name} {self.in_time}"
 
 
 

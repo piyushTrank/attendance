@@ -683,16 +683,36 @@ class LeavesApi(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         user_uuid = request.query_params.get('uuid')
-        user = MyUser.objects.filter(uuid=user_uuid).first() if user_uuid else request.user
+        user = None
+        leave = None
+        all_users = None
+        request_user = None
+        if user_uuid:
+            user = MyUser.objects.filter(uuid=user_uuid).first()
+        else:
+            if request.user.user_type in ["Admin", "SuperAdmin"]:  
+                all_users = True
+            else:
+                request_user = request.user
         try:
-            if user:
-                leave = LeavesModel.objects.values(
-                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", "leave_type",
-                    "from_date", "to_date", "reason", "status", "created_at")
-            elif user:
+            if user:  
+                print("Fetching leave data for specific user.")
                 leave = user.leave_user.values(
-                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", "leave_type",
-                    "from_date", "to_date", "reason", "status", "created_at")
+                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", 
+                    "leave_type", "from_date", "to_date", "reason", "status", "created_at"
+                )
+            elif request_user:  
+                print("Fetching leave data for current user.")
+                leave = request_user.leave_user.values(
+                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", 
+                    "leave_type", "from_date", "to_date", "reason", "status", "created_at"
+                )
+            elif all_users:  
+                print("Fetching leave data for all users.")
+                leave = LeavesModel.objects.values(
+                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", 
+                    "leave_type", "from_date", "to_date", "reason", "status", "created_at"
+                )
             else:
                 return Response({"message": "User not found", "code": 404}, status=status.HTTP_404_NOT_FOUND)
 
@@ -818,3 +838,138 @@ class AttendanceManagementApi(APIView):
 
         return paginator.get_paginated_response(paginated_data)
 
+
+
+import csv
+from django.http import HttpResponse
+
+
+class DownloadCSVApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        today = datetime.now().date()
+        year, month = today.year, today.month
+        total_days_in_month = monthrange(year, month)[1]
+
+        # Generate dynamic headers for dates
+        date_headers = [(today.replace(day=day)).strftime("%m/%d/%Y") for day in range(1, total_days_in_month + 1)]
+
+        # Static headers
+        static_headers = [
+            "Employee Name",
+            "Designation",
+            "Date Of Joining",
+            "Days Worked",
+            "LOP",
+            "Week Off",
+            "Paid Days",
+            "EL Applied",
+            "SL Applied",
+            "Referral",
+            "EL Avail Bal.",
+            "SL Avail Bal."
+        ]
+
+        # Combine headers
+        headers = static_headers + date_headers
+
+        # Query parameters for filtering
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        search_name = request.query_params.get('name', '').strip()
+        uuid = request.query_params.get('uuid')
+
+        # Filter users
+        if uuid:
+            users = MyUser.objects.filter(uuid=uuid).exclude(user_type="Admin")
+        else:
+            users = MyUser.objects.exclude(user_type="Admin")
+
+        if search_name:
+            users = users.filter(
+                Q(first_name__icontains=search_name) |
+                Q(last_name__icontains=search_name) |
+                Q(designation__icontains=search_name)
+            )
+
+        # Create response
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="attendance_{year}_{month}.csv"'
+
+        # Initialize CSV writer
+        writer = csv.writer(response)
+
+        # Write headers
+        writer.writerow(headers)
+
+        # Process each user
+        for user in users:
+            attendance_queryset = AttendanceModel.objects.filter(attendance_user=user)
+            leaves_queryset = LeavesModel.objects.filter(leave_user=user, status="Approved")
+
+            if from_date:
+                from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+                attendance_queryset = attendance_queryset.filter(in_time__date__gte=from_date_obj)
+                leaves_queryset = leaves_queryset.filter(from_date__gte=from_date_obj)
+
+            if to_date:
+                to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
+                attendance_queryset = attendance_queryset.filter(in_time__date__lte=to_date_obj)
+                leaves_queryset = leaves_queryset.filter(to_date__lte=to_date_obj)
+
+            # Calculate attendance and leave details
+            days_worked = attendance_queryset.count()
+
+            el_applied = sum(
+                leave.leave_duration()
+                for leave in leaves_queryset if leave.leave_type == "Earned"
+            )
+            sl_applied = sum(
+                leave.leave_duration()
+                for leave in leaves_queryset if leave.leave_type == "Sick"
+            )
+
+            leave_balance = LeaveBalanceModel.objects.filter(leave_balance_user=user).first()
+            el_available = leave_balance.earned_leave if leave_balance else 0
+            sl_available = leave_balance.sick_leave if leave_balance else 0
+
+            total_weekdays = [
+                (today.replace(day=day)).weekday() for day in range(1, total_days_in_month + 1)
+            ]
+            total_weekoffs = total_weekdays.count(5) + total_weekdays.count(6)
+
+            lop = total_days_in_month - total_weekoffs - days_worked - (el_applied + sl_applied)
+
+            row = [
+                f"{user.first_name} {user.last_name}",
+                user.designation,
+                user.joining_date,
+                days_worked,
+                max(lop, 0),
+                total_weekoffs,
+                total_days_in_month - max(lop, 0),  # Paid Days
+                el_applied,
+                sl_applied,
+                "",  # Referral placeholder
+                el_available,
+                sl_available
+            ]
+
+            # Dynamic attendance data for each day
+            daily_data = []
+            for day in range(1, total_days_in_month + 1):
+                date = today.replace(day=day)
+                if attendance_queryset.filter(in_time__date=date).exists():
+                    daily_data.append("P")
+                elif leaves_queryset.filter(from_date__lte=date, to_date__gte=date).exists():
+                    daily_data.append("Leave")
+                elif date.weekday() in [5, 6]:
+                    daily_data.append("Week Off")
+                else:
+                    daily_data.append("A")
+
+            # Combine static and dynamic data
+            writer.writerow(row + daily_data)
+
+        return response

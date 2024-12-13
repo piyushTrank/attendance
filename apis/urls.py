@@ -33,6 +33,7 @@ urlpatterns = [
     path('approve-leaves/', ApprovedLeave.as_view(),name="approve-leaves"),
 
     path('attendance-management/', AttendanceManagementApi.as_view(),name="attendance-management"),
+    path('download-csv/', DownloadCSVApi.as_view(),name="download-csv"),
 ]
 
 
