@@ -803,7 +803,7 @@ class AttendanceManagementApi(APIView):
             lop = total_days_in_month - total_weekoffs - days_worked - (el_applied + sl_applied)
 
             response_data.append({
-                "Employee Code": user.emp_code,
+                "Employee_Code": user.emp_code,
                 "Employee_Name": f"{user.first_name} {user.last_name}",
                 "Designation": user.designation,
                 "Days_Worked": days_worked,
