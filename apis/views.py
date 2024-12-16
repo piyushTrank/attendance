@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 from django.db.models import F, Count, Q
 import calendar
 from calendar import monthrange
+from django.utils.timezone import now, make_aware
+import csv
+from django.http import HttpResponse
 
 
 
@@ -62,7 +65,6 @@ class CreateEmployeeApi(APIView):
             }
             return Response(response, status=status.HTTP_201_CREATED)
         
-        # Format error messages
         error_messages = {field: errors[0] for field, errors in serializer.errors.items()}
         response = {
             "code": status.HTTP_400_BAD_REQUEST,
@@ -79,8 +81,6 @@ class LogoutUserAPIView(APIView):
     
 
 
-
-
 class EmployeeListApi(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -92,7 +92,7 @@ class EmployeeListApi(APIView):
         if not user_filter.is_valid():
             return Response({"code": 400, "message": user_filter.errors}, status=400)
         filtered_queryset = user_filter.qs.order_by("-id").values(
-            'uuid', 'first_name', 'last_name', 'email', 'phone_number',
+            'uuid', 'first_name', 'last_name', 'emp_code','email', 'phone_number',
             'gender', 'dob', 'joining_date', 'designation', 'address'
         )
         paginator = StandardResultsSetPagination()
@@ -114,6 +114,7 @@ class EmployeeDetailsAPi(APIView):
                 'uuid': user.uuid,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
+                'emp_code': user.emp_code,
                 'email': user.email,
                 'phone_number': user.phone_number,
                 'gender': user.gender,
@@ -201,7 +202,6 @@ class EditEmployeeApi(APIView):
     
 
 
-from django.utils.timezone import now, make_aware
 
 
 class AttendanceInOutTime(APIView):
@@ -253,7 +253,6 @@ class AttendanceInOutTime(APIView):
                 status=status.HTTP_200_OK
             )
         else:
-            # If no record exists, create a new attendance object with `in_time`
             if in_time_str.lower() == "in_time" or not in_time_str:
                 in_time = now()  
             else:
@@ -325,9 +324,9 @@ class GetAllAttendance(APIView):
         try:
             get_user = MyUser.objects.get(uuid=request.query_params.get("uuid"))
             if get_user.user_type == "Admin":
-                attendance = AttendanceModel.objects.values("id", "attendance_user__first_name","attendance_user__last_name","attendance_user__designation", "in_time", "out_time", "duration",  "created_at").order_by("-id")
+                attendance = AttendanceModel.objects.values("id", "attendance_user__first_name","attendance_user__last_name","attendance_user__emp_code","attendance_user__designation", "in_time", "out_time", "duration",  "created_at").order_by("-id")
             else:
-                attendance = get_user.attendance_user.values("id", "attendance_user__first_name","attendance_user__last_name", "attendance_user__designation","in_time", "out_time", "duration", "created_at").order_by("-id")
+                attendance = get_user.attendance_user.values("id", "attendance_user__first_name","attendance_user__last_name", "attendance_user__emp_code","attendance_user__designation","in_time", "out_time", "duration", "created_at").order_by("-id")
             paginator = StandardResultsSetPagination()
             paginated_queryset = paginator.paginate_queryset(attendance, request, view=self)
             return paginator.get_paginated_response(paginated_queryset)
@@ -340,19 +339,10 @@ class AdminDashboardAttendance(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Get total employee count excluding admins
         total_employee_count = MyUser.objects.exclude(user_type="Admin").count()
-
-        # Get today's date
         today = datetime.now().date()
-
-        # Calculate attendance for today
         count_attendance = AttendanceModel.objects.filter(in_time__date=today).count()
-
-        # Calculate absent employees
         absent_count = total_employee_count - count_attendance
-
-        # Calculate total Saturdays and Sundays in the current month
         year = today.year
         month = today.month
         total_days_in_month = monthrange(year, month)[1]
@@ -405,7 +395,7 @@ class RegularizationApi(APIView):
     
     def get(self, request):
         if request.user.user_type == "Admin":
-            regularization = RegularizationModel.objects.values("id", "user_regularization__uuid", "user_regularization__first_name","user_regularization__last_name", "user_regularization__designation","in_time", "out_time", "reason", "approval", "date")
+            regularization = RegularizationModel.objects.values("id", "user_regularization__uuid", "user_regularization__first_name","user_regularization__last_name", "user_regularization__emp_code","user_regularization__designation","in_time", "out_time", "reason", "approval", "date")
             paginator = StandardResultsSetPagination()
             paginated_queryset = paginator.paginate_queryset(regularization, request, view=self)
             return paginator.get_paginated_response(paginated_queryset)
@@ -510,32 +500,25 @@ class EmployeeAttendanceCalendar(APIView):
         attendance_filter = AttendanceFilter(request.GET, queryset=AttendanceModel.objects.filter(attendance_user=user))
         attendance_data = attendance_filter.qs
 
-        # Get year and month from request
         year = request.GET.get('year')
         month = request.GET.get('month')
         today = timezone.now().date()
 
         if not year or not month:
-            # Default to a rolling 30-day window
             start_date = today - timedelta(days=30)
             end_date = today
         else:
-            # Create start_date and end_date based on the requested year and month
             start_date = today.replace(year=int(year), month=int(month), day=1)
             if month == '12':
                 end_date = today.replace(year=int(year), month=12, day=31)
             else:
                 end_date = today.replace(year=int(year), month=int(month) + 1, day=1) - timedelta(days=1)
-
-            # Ensure end_date does not extend beyond today
             end_date = min(end_date, today)
 
-        # Generate date range and initialize calendar data
         date_range = [start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)]
         calendar_data = []
 
         for date in date_range:
-            # Weekends
             if date.weekday() in [5, 6]:  
                 calendar_data.append({
                     'date': date,
@@ -543,7 +526,6 @@ class EmployeeAttendanceCalendar(APIView):
                 })
                 continue
 
-            # Attendance entries
             attendance_entry = next((att for att in attendance_data if att.in_time.date() == date), None)
             if attendance_entry:
                 calendar_data.append({
@@ -556,7 +538,6 @@ class EmployeeAttendanceCalendar(APIView):
             else:
                 calendar_data.append({'date': date, 'status': 'Absent'})
 
-            # Leave entries
             leave_data = LeavesModel.objects.filter(leave_user=user, from_date__lte=date, to_date__gte=date)
             for leave_entry in leave_data:
                 if leave_entry.status == 'Approved':
@@ -567,7 +548,6 @@ class EmployeeAttendanceCalendar(APIView):
                         'reason': leave_entry.reason
                     })
 
-        # Sort data by date
         calendar_data.sort(key=lambda x: x['date'])
         return Response({"calendar_data": calendar_data})
 
@@ -698,19 +678,19 @@ class LeavesApi(APIView):
             if user:  
                 print("Fetching leave data for specific user.")
                 leave = user.leave_user.values(
-                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", 
+                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__emp_code","leave_user__designation", 
                     "leave_type", "from_date", "to_date", "reason", "status", "created_at"
                 )
             elif request_user:  
                 print("Fetching leave data for current user.")
                 leave = request_user.leave_user.values(
-                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", 
+                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__emp_code","leave_user__designation", 
                     "leave_type", "from_date", "to_date", "reason", "status", "created_at"
                 )
             elif all_users:  
                 print("Fetching leave data for all users.")
                 leave = LeavesModel.objects.values(
-                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__designation", 
+                    "id", "leave_user__first_name", "leave_user__last_name", "leave_user__emp_code","leave_user__designation", 
                     "leave_type", "from_date", "to_date", "reason", "status", "created_at"
                 )
             else:
@@ -840,23 +820,33 @@ class AttendanceManagementApi(APIView):
 
 
 
-import csv
-from django.http import HttpResponse
-
 
 class DownloadCSVApi(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         today = datetime.now().date()
-        year, month = today.year, today.month
-        total_days_in_month = monthrange(year, month)[1]
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
 
-        # Generate dynamic headers for dates
-        date_headers = [(today.replace(day=day)).strftime("%m/%d/%Y") for day in range(1, total_days_in_month + 1)]
+        if from_date:
+            from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        else:
+            from_date_obj = today.replace(day=1)
 
-        # Static headers
+        if to_date:
+            to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
+        else:
+            year, month = today.year, today.month
+            to_date_obj = today.replace(day=monthrange(year, month)[1])
+
+        # Generate dynamic headers for the filtered date range
+        date_headers = [
+            (from_date_obj + timedelta(days=i)).strftime("%m/%d/%Y")
+            for i in range((to_date_obj - from_date_obj).days + 1)
+        ]
         static_headers = [
+            "Employee Code",
             "Employee Name",
             "Designation",
             "Date Of Joining",
@@ -870,17 +860,11 @@ class DownloadCSVApi(APIView):
             "EL Avail Bal.",
             "SL Avail Bal."
         ]
-
-        # Combine headers
         headers = static_headers + date_headers
 
-        # Query parameters for filtering
-        from_date = request.query_params.get('from_date')
-        to_date = request.query_params.get('to_date')
         search_name = request.query_params.get('name', '').strip()
         uuid = request.query_params.get('uuid')
 
-        # Filter users
         if uuid:
             users = MyUser.objects.filter(uuid=uuid).exclude(user_type="Admin")
         else:
@@ -893,34 +877,20 @@ class DownloadCSVApi(APIView):
                 Q(designation__icontains=search_name)
             )
 
-        # Create response
         response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="attendance_{year}_{month}.csv"'
-
-        # Initialize CSV writer
+        response['Content-Disposition'] = f'attachment; filename="attendance_{from_date_obj}_{to_date_obj}.csv"'
         writer = csv.writer(response)
-
-        # Write headers
         writer.writerow(headers)
 
-        # Process each user
         for user in users:
-            attendance_queryset = AttendanceModel.objects.filter(attendance_user=user)
-            leaves_queryset = LeavesModel.objects.filter(leave_user=user, status="Approved")
+            attendance_queryset = AttendanceModel.objects.filter(
+                attendance_user=user, in_time__date__gte=from_date_obj, in_time__date__lte=to_date_obj
+            )
+            leaves_queryset = LeavesModel.objects.filter(
+                leave_user=user, status="Approved", from_date__lte=to_date_obj, to_date__gte=from_date_obj
+            )
 
-            if from_date:
-                from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
-                attendance_queryset = attendance_queryset.filter(in_time__date__gte=from_date_obj)
-                leaves_queryset = leaves_queryset.filter(from_date__gte=from_date_obj)
-
-            if to_date:
-                to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
-                attendance_queryset = attendance_queryset.filter(in_time__date__lte=to_date_obj)
-                leaves_queryset = leaves_queryset.filter(to_date__lte=to_date_obj)
-
-            # Calculate attendance and leave details
             days_worked = attendance_queryset.count()
-
             el_applied = sum(
                 leave.leave_duration()
                 for leave in leaves_queryset if leave.leave_type == "Earned"
@@ -935,31 +905,32 @@ class DownloadCSVApi(APIView):
             sl_available = leave_balance.sick_leave if leave_balance else 0
 
             total_weekdays = [
-                (today.replace(day=day)).weekday() for day in range(1, total_days_in_month + 1)
+                (from_date_obj + timedelta(days=i)).weekday()
+                for i in range((to_date_obj - from_date_obj).days + 1)
             ]
             total_weekoffs = total_weekdays.count(5) + total_weekdays.count(6)
 
-            lop = total_days_in_month - total_weekoffs - days_worked - (el_applied + sl_applied)
+            lop = (to_date_obj - from_date_obj).days + 1 - total_weekoffs - days_worked - (el_applied + sl_applied)
 
             row = [
+                user.emp_code,
                 f"{user.first_name} {user.last_name}",
                 user.designation,
                 user.joining_date,
                 days_worked,
                 max(lop, 0),
                 total_weekoffs,
-                total_days_in_month - max(lop, 0),  # Paid Days
+                (to_date_obj - from_date_obj).days + 1 - max(lop, 0),
                 el_applied,
                 sl_applied,
-                "",  # Referral placeholder
+                "", 
                 el_available,
                 sl_available
             ]
 
-            # Dynamic attendance data for each day
             daily_data = []
-            for day in range(1, total_days_in_month + 1):
-                date = today.replace(day=day)
+            for i in range((to_date_obj - from_date_obj).days + 1):
+                date = from_date_obj + timedelta(days=i)
                 if attendance_queryset.filter(in_time__date=date).exists():
                     daily_data.append("P")
                 elif leaves_queryset.filter(from_date__lte=date, to_date__gte=date).exists():
@@ -969,7 +940,6 @@ class DownloadCSVApi(APIView):
                 else:
                     daily_data.append("A")
 
-            # Combine static and dynamic data
             writer.writerow(row + daily_data)
 
         return response

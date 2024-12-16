@@ -14,7 +14,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     class Meta:
         model = MyUser
         fields = [
-            'first_name', 'last_name', 'email', 'phone_number', 
+            'first_name', 'last_name', 'emp_code','email', 'phone_number', 
             'gender', 'dob', 'joining_date', 'designation', 'address', 'password'
         ]
 
@@ -22,6 +22,10 @@ class EmployeeSerializer(serializers.ModelSerializer):
         """Validate if email is unique."""
         if MyUser.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError("A user with this email already exists.")
+        return value
+    def validate_emp_code(self, value):
+        if MyUser.objects.filter(emp_code=value).exists():
+            raise serializers.ValidationError("A user with this employee code already exists.")
         return value
 
     def create(self, validated_data):

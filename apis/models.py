@@ -47,6 +47,7 @@ class MyUser(AbstractBaseUser,CommonTimePicker):
     user_type = models.CharField("User Type", max_length=10, default='Admin', choices=USERTYPE)
     first_name = models.CharField("First Name", max_length=256, blank=True, null=True)
     last_name = models.CharField("Last Name", max_length=256, blank=True, null=True)
+    emp_code = models.CharField("Employee Code", max_length=256, blank=True, null=True,unique=True)
     email = models.EmailField("Email Address", null=True, blank=True, unique=True,db_index=True)
     phone_number = models.CharField('Phone Number', max_length=256,default="",null=True,blank=True)
     gender = models.CharField("Gender", max_length=20, choices=GENDER,blank=True)
