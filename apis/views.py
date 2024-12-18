@@ -202,26 +202,29 @@ class EditEmployeeApi(APIView):
     
 
 
-
-
 class AttendanceInOutTime(APIView):
     permission_classes = [IsAuthenticated]
+
     def post(self, request):
         user_uuid = request.data.get('uuid')
         if user_uuid:
             try:
                 user = MyUser.objects.get(uuid=user_uuid)  
+                print("user",user)
+
             except MyUser.DoesNotExist:
                 return Response({"error": "User with the given UUID does not exist."}, status=status.HTTP_404_NOT_FOUND)
         else:
             user = request.user
+            print("ddd",user)
 
-        
+        # Get in_time and out_time from request data
         in_time_str = request.data.get("in_time", "").strip()
         out_time_str = request.data.get("out_time", "").strip()
         in_time = now()
         out_time = None
 
+        # Handle in_time and out_time date logic
         today_start = make_aware(datetime.combine(in_time.date(), datetime.min.time()))
         today_end = make_aware(datetime.combine(in_time.date(), datetime.max.time()))
         attendance = AttendanceModel.objects.filter(
@@ -229,9 +232,10 @@ class AttendanceInOutTime(APIView):
             in_time__range=(today_start, today_end)
         ).first()
 
+        # Process out_time if available
         if attendance:
             if out_time_str.lower() == "out_time" or not out_time_str:
-                out_time = now()  
+                out_time = now()
             else:
                 try:
                     out_time = make_aware(datetime.fromisoformat(out_time_str))
@@ -240,10 +244,20 @@ class AttendanceInOutTime(APIView):
                         {"error": "Invalid out_time format. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS)."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-            # Update `out_time` and calculate duration
+            # Update `out_time` and duration
             attendance.out_time = out_time
             attendance.duration = str(attendance.out_time - attendance.in_time)
             attendance.save()
+
+            # Upload OUT image if exists in request
+            if 'out_image' in request.FILES:
+                out_image = request.FILES['out_image']
+                image_name = f"out_{attendance.id}_{out_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+                AttendanceInOutImages.objects.create(
+                    image_user=attendance,
+                    image=out_image,
+                    image_type='OUT',
+                )
             return Response(
                 {"message": "Out time updated successfully.", "data": {
                     "in_time": attendance.in_time,
@@ -252,9 +266,10 @@ class AttendanceInOutTime(APIView):
                 }},
                 status=status.HTTP_200_OK
             )
+
         else:
             if in_time_str.lower() == "in_time" or not in_time_str:
-                in_time = now()  
+                in_time = now()
             else:
                 try:
                     in_time = make_aware(datetime.fromisoformat(in_time_str))
@@ -263,13 +278,26 @@ class AttendanceInOutTime(APIView):
                         {"error": "Invalid in_time format. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS)."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-            
-            # Create new attendance
+
+            # Create new attendance entry
             attendance = AttendanceModel.objects.create(
                 attendance_user=user,
                 in_time=in_time,
                 out_time=out_time,
             )
+
+            # Upload IN image if exists in request
+            if 'in_image' in request.FILES:
+                in_image = request.FILES['in_image']
+                print("in_image",in_image)
+                image_name = f"in_{attendance.id}_{in_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+                print("image_name",image_name)
+                AttendanceInOutImages.objects.create(
+                    image_user=attendance,
+                    image=in_image,
+                    image_type='IN',
+                )
+
             return Response(
                 {"message": "In time saved successfully.", "data": {
                     "in_time": attendance.in_time,

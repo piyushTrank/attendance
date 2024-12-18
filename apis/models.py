@@ -101,6 +101,51 @@ class AttendanceModel(CommonTimePicker):
 
     def __str__(self):
         return f"{self.attendance_user.first_name} {self.in_time}"
+    
+
+from apis.utils import *
+import os
+from datetime import datetime
+import os
+from datetime import datetime
+
+def user_directory_path(instance, filename):
+    user_folder = (
+        instance.image_user.attendance_user.email or instance.image_user.attendance_user.emp_code or "user"
+    )[:15]
+    
+    if instance.image_type == 'IN':
+        time_stamp = instance.image_user.in_time
+    elif instance.image_type == 'OUT':
+        time_stamp = instance.image_user.out_time
+    else:
+        time_stamp = None
+
+    if time_stamp:
+        time_str = time_stamp.strftime('%Y-%m-%d_%H-%M-%S')  
+    else:
+        time_str = "unknown"
+
+    new_filename = f"{instance.image_type.lower()}_{time_str}.png"
+    return os.path.join('attendance', user_folder, new_filename)
+
+
+class AttendanceInOutImages(CommonTimePicker):
+    """Model for storing attendance images"""
+    IN_OUT_CHOICES = [
+        ('IN', 'In Time'),
+        ('OUT', 'Out Time'),
+    ]
+
+    image_user = models.ForeignKey(AttendanceModel, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to=user_directory_path)
+    image_type = models.CharField(max_length=3, choices=IN_OUT_CHOICES)
+
+    def __str__(self):
+        return f"{self.image_user.attendance_user.first_name} - {self.image_type}"
+
+    
+
 
 
 
