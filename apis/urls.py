@@ -1,5 +1,7 @@
 from django.urls import path
 from apis.views import *
+from django.conf import settings
+from django.conf.urls.static import static
 
 
 urlpatterns = [
@@ -34,6 +36,12 @@ urlpatterns = [
 
     path('attendance-management/', AttendanceManagementApi.as_view(),name="attendance-management"),
     path('download-csv/', DownloadCSVApi.as_view(),name="download-csv"),
+    path('document/', UploadDownloadDocumentApi.as_view(), name='upload_document'),
+
 ]
+
+# if settings.DEBUG:  # Serve media files in development mode
+#     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
 
 

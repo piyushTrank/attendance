@@ -105,9 +105,6 @@ class AttendanceModel(CommonTimePicker):
 
 from apis.utils import *
 import os
-from datetime import datetime
-import os
-from datetime import datetime
 
 def user_directory_path(instance, filename):
     user_folder = (
@@ -153,6 +150,7 @@ class LeavesModel(CommonTimePicker):
     """ Leaves Model """
     leave_user = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name='leave_user')
     leave_type = models.CharField("Leave Type", max_length=20, choices=LEAVE_TYPE)
+    dayoption = models.CharField("Day Option", max_length=20, choices=DAY_OPTION, default="full")
 
     from_date = models.DateField("From Date", blank=True, null=True)
     to_date = models.DateField("To Date")
@@ -170,6 +168,8 @@ class LeavesModel(CommonTimePicker):
 
     def leave_duration(self):
         """ Calculate leave duration in days """
+        if(self.dayoption == 'half'):
+            return 0.5
         if self.from_date and self.to_date:
             return (self.to_date - self.from_date).days + 1
         return 0
@@ -180,6 +180,9 @@ class LeaveBalanceModel(models.Model):
     leave_balance_user = models.OneToOneField(MyUser, on_delete=models.CASCADE, related_name='leave_balance_user')
     earned_leave = models.FloatField("Earned Leave", default=0)
     sick_leave = models.FloatField("Sick Leave", default=0)
+    used_earned_leave = models.FloatField("Used Earned Leave", default=0)
+    used_sick_leave = models.FloatField("Used Sick Leave", default=0)
+
 
     class Meta:
         ordering = ['-id']
@@ -200,14 +203,18 @@ def update_leave_balance(sender, instance, **kwargs):
             if instance.leave_type == 'Earned':
                 if leave_balance.earned_leave >= leave_duration:
                     leave_balance.earned_leave -= leave_duration
+                    leave_balance.used_earned_leave += leave_duration
                 else:
                     raise ValueError("Insufficient Earned Leave balance.")
             elif instance.leave_type == 'Sick':
                 if leave_balance.sick_leave >= leave_duration:
                     leave_balance.sick_leave -= leave_duration
+                    leave_balance.used_sick_leave += leave_duration
+
                 else:
                     raise ValueError("Insufficient Sick Leave balance.")
             leave_balance.save()
+
 
 
 
@@ -235,3 +242,16 @@ class RegularizationModel(CommonTimePicker):
 
     def __str__ (self):
        return f"{self.user_regularization.first_name} {self.reason}"
+
+
+
+
+
+class UserDocument(models.Model):
+    user = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name="documents", null=True, blank=True)
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_CHOICES, null=True, blank=True)
+    file = models.FileField(upload_to='user_documents/', null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.email} - {self.get_document_type_display()}"

@@ -3,22 +3,18 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from apis.models import *
-from rest_framework.exceptions import APIException
 from apis.serializer import *
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from apis.pagination import *
 from apis.filters import *
-from django.utils.timezone import make_aware
+from django.utils.timezone import make_aware, now
 from datetime import datetime, timedelta
 from django.db.models import F, Count, Q
 import calendar
 from calendar import monthrange
-from django.utils.timezone import now, make_aware
 import csv
 from django.http import HttpResponse
-
-
-
+from django.db.models.functions import TruncDate
 
 class LoginAPI(APIView):
     permission_classes = [AllowAny]
@@ -210,13 +206,11 @@ class AttendanceInOutTime(APIView):
         if user_uuid:
             try:
                 user = MyUser.objects.get(uuid=user_uuid)  
-                print("user",user)
 
             except MyUser.DoesNotExist:
                 return Response({"error": "User with the given UUID does not exist."}, status=status.HTTP_404_NOT_FOUND)
         else:
             user = request.user
-            print("ddd",user)
 
         # Get in_time and out_time from request data
         in_time_str = request.data.get("in_time", "").strip()
@@ -541,10 +535,26 @@ class EmployeeAttendanceCalendar(APIView):
                 end_date = today.replace(year=int(year), month=12, day=31)
             else:
                 end_date = today.replace(year=int(year), month=int(month) + 1, day=1) - timedelta(days=1)
-            end_date = min(end_date, today)
+            # end_date = max(end_date, today)
 
         date_range = [start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)]
         calendar_data = []
+
+        total_present=0
+        total_absent=0
+
+        #---------------FOR 9 HOUR FUNCTIONALITY
+        def parse_duration(duration):
+                if duration is None:
+                    return None
+                try:
+                    return datetime.strptime(duration, "%H:%M:%S.%f")
+                except ValueError:
+                    try:
+                        return datetime.strptime(duration, "%H:%M:%S")
+                    except ValueError:
+                        return None
+        #-----------------------------------------------
 
         for date in date_range:
             if date.weekday() in [5, 6]:  
@@ -554,7 +564,29 @@ class EmployeeAttendanceCalendar(APIView):
                 })
                 continue
 
-            attendance_entry = next((att for att in attendance_data if att.in_time.date() == date), None)
+            
+            # 9 HOUR FUNCTIONALITYYYY-----------------------------------
+            attendance_entry = next(
+    (
+        att for att in attendance_data
+        if att.in_time.date() == date  # Match date
+        and (parsed_duration := parse_duration(att.duration)) is not None
+        and (parsed_duration - datetime(1900, 1, 1)) > timedelta(hours=8)
+    ),
+    None
+)
+            # attendance_entry2 = next((att for att in attendance_data if att.in_time.date() == date), None)
+            attendance_entry2 = next(
+    (
+        att for att in attendance_data
+        if att.in_time.date() == date  # Match date
+        and (parsed_duration := parse_duration(att.duration)) is not None
+        and (parsed_duration - datetime(1900, 1, 1)) > timedelta(hours=5)
+    ),
+    None
+)
+            #-----------------------------------------------------------
+
             if attendance_entry:
                 calendar_data.append({
                     'date': date,
@@ -563,8 +595,23 @@ class EmployeeAttendanceCalendar(APIView):
                     'out_time': attendance_entry.out_time,
                     'duration': attendance_entry.duration
                 })
+                total_present+=1
+            elif attendance_entry2:
+                calendar_data.append({
+                    'date': date,
+                    'status': 'Half Day',
+                    'in_time': attendance_entry2.in_time,
+                    'out_time': attendance_entry2.out_time,
+                    'duration': attendance_entry2.duration
+                })
+                total_present+=1
+
+
+            elif(date>today):
+                calendar_data.append({'date': date, 'status': ''})
             else:
                 calendar_data.append({'date': date, 'status': 'Absent'})
+                total_absent+=1
 
             leave_data = LeavesModel.objects.filter(leave_user=user, from_date__lte=date, to_date__gte=date)
             for leave_entry in leave_data:
@@ -575,9 +622,11 @@ class EmployeeAttendanceCalendar(APIView):
                         'leave_type': leave_entry.leave_type,
                         'reason': leave_entry.reason
                     })
+                    total_absent-=1
 
         calendar_data.sort(key=lambda x: x['date'])
-        return Response({"calendar_data": calendar_data})
+        
+        return Response({"calendar_data": calendar_data, "total_present":total_present, "total_absent":total_absent})
 
     
 
@@ -593,36 +642,58 @@ class EmployeeDashboardCount(APIView):
             user = request.user
         if not user:
             return Response({"detail": "User not found"}, status=404)
-        today = timezone.now().date()
-        start_date = user.joining_date if user.joining_date else today
-        present_count = AttendanceModel.objects.filter(
+        # today = timezone.now().date()
+        today = datetime.today().date()
+        current_month = today.month
+        current_year = today.year
+        start_date = datetime(today.year, today.month, 1).date()
+        # print("start date",start_date)
+        # start_date = user.joining_date if user.joining_date else today
+        present_count = (AttendanceModel.objects.filter(
             attendance_user=user,
-            in_time__gte=start_date,
-            in_time__lte=today
-        ).values('in_time__date').distinct().count()
-        absent_count = AttendanceModel.objects.filter(
-            attendance_user=user,
-            in_time__gte=start_date,
-            in_time__lte=today
-        ).filter(out_time__isnull=True).values('in_time__date').distinct().count()
-        leave_data = LeavesModel.objects.filter(
-            leave_user=user,
-            status="Approved",
-            from_date__gte=start_date,
-            to_date__lte=today
+            in_time__year=current_year,
+            in_time__month=current_month,
         )
-        total_used_leave = sum([leave.leave_duration() for leave in leave_data])
+        .annotate(present_day=TruncDate('in_time'))  # Group by date
+        .values('present_day')  # Extract distinct dates
+        .distinct()  # Ensure only unique days are counted
+        .count()  # Count the distinct dates
+        )
+        absent_count = AttendanceModel.objects.filter(
+        attendance_user=user,
+        duration__isnull=True
+        ).annotate(date=F('in_time__date')).values('date').distinct().count()
+
+        # leave_data = LeavesModel.objects.filter(
+        #     leave_user=user,
+        #     status="Approved",
+        #     from_date__gte=start_date,
+        #     to_date__lte=today
+        # ).values('dayoption')
+        # print(leave_data)
+        # # total_used_leave = sum([leave.leave_duration() for leave in leave_data])
+        # total_used_leave = 0
+        # for leave in leave_data:
+        #     print("kkkkkkkkkkk",leave['dayoption'])
+        #     if(leave['dayoption'] == "half"):
+        #         total_used_leave+=0.5
+        #     elif(leave['dayoption'] == "full"):
+        #         total_used_leave+=1
+        #     else:
+        #         total_used_leave+=0
+        # print(total_used_leave)
         leave_balance = LeaveBalanceModel.objects.filter(leave_balance_user=user).first()
         if leave_balance:
             earned_leave = leave_balance.earned_leave
             sick_leave = leave_balance.sick_leave
+            total_used_leave = leave_balance.used_earned_leave + leave_balance.used_sick_leave
         else:
             earned_leave = sick_leave = 0
-
+            total_used_leave = 0
         total_leave_balance = earned_leave + sick_leave
         response_data = {
-            "total_present": present_count,
-            "total_absent": absent_count,
+            # "total_present": present_count,
+            # "total_absent": absent_count,
             "total_leave_balance": total_leave_balance,
             "total_used_leave": total_used_leave,
             "earned_leave":earned_leave,
@@ -645,23 +716,37 @@ class ApplyLeaveApi(APIView):
             user = request.user
         if not user:
             return Response({"detail": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        dayoption = request.data.get('dayoption')
         leave_type = request.data.get('leave_type')
         from_date_str = request.data.get('from_date')
         to_date_str = request.data.get('to_date')
         reason = request.data.get('reason')
+
         try:
             from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
             to_date = datetime.strptime(to_date_str, "%Y-%m-%d").date()
         except ValueError:
             return Response({"detail": "Invalid date format. Use 'YYYY-MM-DD'."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        already_leave_present = LeavesModel.objects.filter(leave_user=user, from_date=from_date)
+        if(already_leave_present):
+            return Response({"detail": "leave already applied for this day"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if(from_date<now().date() or to_date<now().date()):
+            return Response({"detail": "You can't take leave for previous date"}, status=status.HTTP_400_BAD_REQUEST)
         if not leave_type or not from_date or not to_date:
             return Response({"detail": "Leave type, from date, and to date are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not dayoption:
+            return Response({"detail": "dayoption is required."}, status=status.HTTP_400_BAD_REQUEST)
         if from_date < timezone.now().date() or to_date < timezone.now().date():
             return Response({"detail": "Leave dates cannot be in the past."}, status=status.HTTP_400_BAD_REQUEST)
         leave_balance = LeaveBalanceModel.objects.filter(leave_balance_user=user).first()
         if not leave_balance:
             return Response({"detail": "Leave balance not found for this user."}, status=status.HTTP_400_BAD_REQUEST)
-        leave_duration = (to_date - from_date).days + 1
+        if(dayoption=='half'):
+            leave_duration = 0.5
+        else:
+            leave_duration = (to_date - from_date).days + 1
         if leave_type == 'Earned':
             if leave_balance.earned_leave < leave_duration:
                 return Response({"detail": "Insufficient earned leave balance."}, status=status.HTTP_400_BAD_REQUEST)
@@ -670,12 +755,14 @@ class ApplyLeaveApi(APIView):
                 return Response({"detail": "Insufficient sick leave balance."}, status=status.HTTP_400_BAD_REQUEST)
         leave = LeavesModel(
             leave_user=user,
+            dayoption=dayoption,
             leave_type=leave_type,
             from_date=from_date,
             to_date=to_date,
             reason=reason,
             status="Pending"
         )
+        
         leave.save()
 
         return Response({
@@ -707,19 +794,19 @@ class LeavesApi(APIView):
                 print("Fetching leave data for specific user.")
                 leave = user.leave_user.values(
                     "id", "leave_user__first_name", "leave_user__last_name", "leave_user__emp_code","leave_user__designation", 
-                    "leave_type", "from_date", "to_date", "reason", "status", "created_at"
+                    "leave_type", "from_date", "to_date", "reason", "status", "created_at", "dayoption"
                 )
             elif request_user:  
                 print("Fetching leave data for current user.")
                 leave = request_user.leave_user.values(
                     "id", "leave_user__first_name", "leave_user__last_name", "leave_user__emp_code","leave_user__designation", 
-                    "leave_type", "from_date", "to_date", "reason", "status", "created_at"
+                    "leave_type", "from_date", "to_date", "reason", "status", "created_at", "dayoption"
                 )
             elif all_users:  
                 print("Fetching leave data for all users.")
                 leave = LeavesModel.objects.values(
                     "id", "leave_user__first_name", "leave_user__last_name", "leave_user__emp_code","leave_user__designation", 
-                    "leave_type", "from_date", "to_date", "reason", "status", "created_at"
+                    "leave_type", "from_date", "to_date", "reason", "status", "created_at", "dayoption"
                 )
             else:
                 return Response({"message": "User not found", "code": 404}, status=status.HTTP_404_NOT_FOUND)
@@ -786,7 +873,6 @@ class AttendanceManagementApi(APIView):
             for i in range(total_days_in_month)
         ]
         total_weekoffs = weekdays.count(5) + weekdays.count(6)
-
         from_date = request.query_params.get('from_date')
         to_date = request.query_params.get('to_date')
         search_name = request.query_params.get('name', '').strip()
@@ -828,6 +914,8 @@ class AttendanceManagementApi(APIView):
             leave_balance = LeaveBalanceModel.objects.filter(leave_balance_user=user).first()
             el_available = leave_balance.earned_leave if leave_balance else 0
             sl_available = leave_balance.sick_leave if leave_balance else 0
+            # el_available = leave_balance.used_earned_leave
+            # sl_available = leave_balance.used_sick_leave
             lop = total_days_in_month - total_weekoffs - days_worked - (el_applied + sl_applied)
 
             response_data.append({
@@ -878,7 +966,10 @@ class DownloadCSVApi(APIView):
             "Employee Code",
             "Employee Name",
             "Designation",
-            "Date Of Joining",
+            "Date Of Joining"
+        ]
+
+        static_headers2 = [
             "Days Worked",
             "LOP",
             "Week Off",
@@ -889,7 +980,8 @@ class DownloadCSVApi(APIView):
             "EL Avail Bal.",
             "SL Avail Bal."
         ]
-        headers = static_headers + date_headers
+
+        headers = static_headers + date_headers + static_headers2
 
         search_name = request.query_params.get('name', '').strip()
         uuid = request.query_params.get('uuid')
@@ -946,6 +1038,9 @@ class DownloadCSVApi(APIView):
                 f"{user.first_name} {user.last_name}",
                 user.designation,
                 user.joining_date,
+            ]
+
+            row2 = [
                 days_worked,
                 max(lop, 0),
                 total_weekoffs,
@@ -969,6 +1064,66 @@ class DownloadCSVApi(APIView):
                 else:
                     daily_data.append("A")
 
-            writer.writerow(row + daily_data)
+            writer.writerow(row + daily_data + row2)
 
         return response
+
+    
+class UploadDownloadDocumentApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        document_type = request.data.get("document_type")
+        uuid = request.data.get("uuid")
+        current_user = MyUser.objects.filter(uuid=uuid).first()
+        if not document_type:
+            return Response({"error": "Document type is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        existing_document = UserDocument.objects.filter(user=current_user, document_type=document_type).first()
+
+        if existing_document:
+            # Delete the old document file
+            if existing_document.file:
+                file_path = existing_document.file.path
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                existing_document.file.delete(save=False)
+            # Delete the existing record
+            existing_document.delete()
+
+        serializer = UserDocumentSerializer(data=request.data)
+        if serializer.is_valid():
+            saved_document = serializer.save(user=current_user)  # Save the new document
+
+            # Build the absolute URL for the uploaded file
+            file_url = request.build_absolute_uri(saved_document.file.url)
+
+            return Response({
+                "message": "Document uploaded successfully",
+                "data": serializer.data,
+                "file_url": file_url  # Add file link in the response
+            }, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def get(self, request):
+        document_type = request.query_params.get("document_type")
+        current_user = MyUser.objects.filter(uuid=request.query_params.get("uuid")).first()
+        if not document_type:
+            return Response({"error": "Document type is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        document = UserDocument.objects.filter(user=current_user, document_type=document_type).first()
+
+
+
+        if document:
+            # Build the absolute URL for the document's file
+            file_url = request.build_absolute_uri(document.file.url)
+
+            return Response({
+                "message": "Document retrieved successfully",
+                "data": UserDocumentSerializer(document).data,
+                "file_url": file_url
+            }, status=status.HTTP_200_OK)
+
+        return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)

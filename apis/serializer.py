@@ -14,7 +14,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     class Meta:
         model = MyUser
         fields = [
-            'first_name', 'last_name', 'emp_code','email', 'phone_number', 
+            'first_name', 'last_name', 'emp_code','email', 'phone_number',
             'gender', 'dob', 'joining_date', 'designation', 'address', 'password'
         ]
 
@@ -63,6 +63,11 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+
+class UserDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserDocument
+        fields = ['id','document_type', 'file', 'uploaded_at']
 
 
 

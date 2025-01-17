@@ -13,7 +13,7 @@ CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://192.168.0.128:3000',
-    'http://192.168.0.137:3000',
+    'http://192.168.0.134:3000',
 ]
 CSRF_COOKIE_SECURE = False
 
@@ -98,7 +98,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 
 USE_I18N = True
 
@@ -141,6 +141,8 @@ REST_FRAMEWORK = {
 
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(days=15),
-    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=15),
+    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(days=365),
+    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=365),
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
 }
